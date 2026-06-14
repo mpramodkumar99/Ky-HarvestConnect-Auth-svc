@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { InMemoryOtpRepository, InMemorySessionRepository } from './repository.js';
-import { FakeOtpProvider, SimpleHmacJwt, FakeUserLookup, HttpUserLookup } from './ports.js';
+import { FakeOtpProvider, SimpleHmacJwt, HttpUserLookup } from './ports.js';
 import { AuthService } from './service.js';
 import { registerAuthRoutes } from './routes.js';
 
@@ -17,9 +17,9 @@ async function start() {
   const jwtPort     = new SimpleHmacJwt(
     process.env['JWT_SECRET'] ?? 'hc-dev-secret-do-not-use-in-prod',
   );
-  const userLookup = process.env['USER_SVC_URL']
-    ? new HttpUserLookup(process.env['USER_SVC_URL'])    // → live user-svc
-    : new FakeUserLookup();                              // → dev seed
+  const userLookup = new HttpUserLookup(
+    process.env['USER_SVC_URL'] ?? 'http://localhost:3002',
+  );
 
   const service = new AuthService(otpRepo, sessionRepo, otpPort, jwtPort, userLookup);
   registerAuthRoutes(app, service);
