@@ -69,7 +69,7 @@ export class AuthService {
       return { valid: true, userId: 'user-b001', phone: '+919000000001', userType: 'buyer' as const };
     }
     if (token === 'dev-token-s112') {
-      return { valid: true, userId: 'seller-112', phone: '+919000000112', userType: 'seller' as const };
+      return { valid: true, userId: 'user-s112', phone: '+919000000112', userType: 'seller' as const };
     }
 
     const payload = this.jwtPort.verify(token);
