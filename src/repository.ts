@@ -1,35 +1,35 @@
 import { randomUUID } from 'node:crypto';
-import type { OtpRecord, Session } from './types.js';
+import type { OtpRecord, Session, UserType } from './types.js';
 
 // ── OTP REPOSITORY ────────────────────────────────────────────────────────────
 
 export interface OtpRepository {
-  create(phone: string, code: string, expiresAt: string): Promise<OtpRecord>;
-  findActiveByPhone(phone: string): Promise<OtpRecord | null>;
-  invalidateAllForPhone(phone: string): Promise<void>;
+  create(phone: string, code: string, userType: UserType, expiresAt: string): Promise<OtpRecord>;
+  findActiveByPhone(phone: string, userType: UserType): Promise<OtpRecord | null>;
+  invalidateAllForPhone(phone: string, userType: UserType): Promise<void>;
   markUsed(id: string): Promise<void>;
 }
 
 export class InMemoryOtpRepository implements OtpRepository {
   private store = new Map<string, OtpRecord>();
 
-  async create(phone: string, code: string, expiresAt: string): Promise<OtpRecord> {
-    const record: OtpRecord = { id: randomUUID(), phone, code, expiresAt, used: false };
+  async create(phone: string, code: string, userType: UserType, expiresAt: string): Promise<OtpRecord> {
+    const record: OtpRecord = { id: randomUUID(), phone, code, userType, expiresAt, used: false };
     this.store.set(record.id, record);
     return record;
   }
 
-  async findActiveByPhone(phone: string): Promise<OtpRecord | null> {
+  async findActiveByPhone(phone: string, userType: UserType): Promise<OtpRecord | null> {
     const now = new Date().toISOString();
     for (const r of this.store.values()) {
-      if (r.phone === phone && !r.used && r.expiresAt > now) return r;
+      if (r.phone === phone && r.userType === userType && !r.used && r.expiresAt > now) return r;
     }
     return null;
   }
 
-  async invalidateAllForPhone(phone: string): Promise<void> {
+  async invalidateAllForPhone(phone: string, userType: UserType): Promise<void> {
     for (const [id, r] of this.store.entries()) {
-      if (r.phone === phone && !r.used) this.store.set(id, { ...r, used: true });
+      if (r.phone === phone && r.userType === userType && !r.used) this.store.set(id, { ...r, used: true });
     }
   }
 
@@ -96,6 +96,16 @@ export class InMemorySessionRepository implements SessionRepository {
         phone: '+919000000112',
         userType: 'seller',
         token: 'dev-token-s112',
+        issuedAt: now,
+        expiresAt: far,
+        revoked: false,
+      },
+      {
+        id: 'session-dev-agent001',
+        userId: 'agent-001',
+        phone: '+919000000099',
+        userType: 'agent',
+        token: 'dev-token-agent001',
         issuedAt: now,
         expiresAt: far,
         revoked: false,
