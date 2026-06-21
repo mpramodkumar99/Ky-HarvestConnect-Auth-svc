@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { OtpRepository, SessionRepository } from './repository.js';
 import type { OtpPort, JwtPort, UserLookupPort } from './ports.js';
 import { NotFoundError, UnauthorizedError } from './errors.js';
+import type { UserType } from './types.js';
 
 function normalizePhone(raw: string): string {
   const digits = raw.replace(/\D/g, '');
@@ -24,31 +25,30 @@ export class AuthService {
     private userLookup:  UserLookupPort,
   ) {}
 
-  async requestOtp(rawPhone: string) {
+  async requestOtp(rawPhone: string, userType: UserType) {
     const phone = normalizePhone(rawPhone);
-    const user = await this.userLookup.findByPhone(phone);
+    const user  = await this.userLookup.findByPhoneAndType(phone, userType);
     if (!user) {
-      throw new NotFoundError(`No account found for ${phone}. Register first.`);
+      throw new NotFoundError(`No ${userType} account found for ${phone}. Register first.`);
     }
-    // Invalidate any existing unused OTP before issuing a new one
-    await this.otpRepo.invalidateAllForPhone(phone);
+    await this.otpRepo.invalidateAllForPhone(phone, userType);
     const code      = generateCode();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-    await this.otpRepo.create(phone, code, expiresAt);
+    await this.otpRepo.create(phone, code, userType, expiresAt);
     await this.otpPort.send(phone, code);
     return { message: 'OTP sent', phone };
   }
 
-  async verifyOtp(rawPhone: string, code: string) {
+  async verifyOtp(rawPhone: string, code: string, userType: UserType) {
     const phone  = normalizePhone(rawPhone);
-    const record = await this.otpRepo.findActiveByPhone(phone);
-    if (!record)           throw new UnauthorizedError('OTP expired or not found. Request a new one.');
+    const record = await this.otpRepo.findActiveByPhone(phone, userType);
+    if (!record)              throw new UnauthorizedError('OTP expired or not found. Request a new one.');
     if (record.code !== code) throw new UnauthorizedError('Incorrect OTP.');
 
     await this.otpRepo.markUsed(record.id);
 
-    const user = await this.userLookup.findByPhone(phone);
-    if (!user) throw new NotFoundError(`User not found for ${phone}`);
+    const user = await this.userLookup.findByPhoneAndType(phone, userType);
+    if (!user) throw new NotFoundError(`No ${userType} account found for ${phone}`);
 
     const sessionId = randomUUID();
     const token     = this.jwtPort.sign({ sub: user.id, phone, userType: user.type, sessionId });
@@ -65,12 +65,9 @@ export class AuthService {
 
   async verifyToken(token: string) {
     // Dev bypass — hardcoded tokens bypass JWT verification
-    if (token === 'dev-token-b001') {
-      return { valid: true, userId: 'user-b001', phone: '+919000000001', userType: 'buyer' as const };
-    }
-    if (token === 'dev-token-s112') {
-      return { valid: true, userId: 'user-s112', phone: '+919000000112', userType: 'seller' as const };
-    }
+    if (token === 'dev-token-b001')      return { valid: true, userId: 'user-b001',   phone: '+919000000001', userType: 'buyer'  as const };
+    if (token === 'dev-token-s112')      return { valid: true, userId: 'user-s112',   phone: '+919000000112', userType: 'seller' as const };
+    if (token === 'dev-token-agent001')  return { valid: true, userId: 'agent-001',   phone: '+919000000099', userType: 'agent'  as const };
 
     const payload = this.jwtPort.verify(token);
     if (!payload) return { valid: false as const };

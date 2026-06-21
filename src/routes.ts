@@ -30,7 +30,7 @@ export function registerAuthRoutes(app: FastifyInstance, service: AuthService) {
   app.post('/v1/auth/otp/request', async (request, reply) => {
     try {
       const body   = requestOtpSchema.parse(request.body);
-      const result = await service.requestOtp(body.phone);
+      const result = await service.requestOtp(body.phone, body.userType);
       return reply.send({ success: true, data: result });
     } catch (err) { return handleError(err, reply); }
   });
@@ -39,7 +39,7 @@ export function registerAuthRoutes(app: FastifyInstance, service: AuthService) {
   app.post('/v1/auth/otp/verify', async (request, reply) => {
     try {
       const body   = verifyOtpSchema.parse(request.body);
-      const result = await service.verifyOtp(body.phone, body.code);
+      const result = await service.verifyOtp(body.phone, body.code, body.userType);
       return reply.send({ success: true, data: result });
     } catch (err) { return handleError(err, reply); }
   });

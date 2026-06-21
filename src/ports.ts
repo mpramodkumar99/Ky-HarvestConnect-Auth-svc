@@ -58,39 +58,44 @@ export class SimpleHmacJwt implements JwtPort {
 }
 
 // ── USER-SVC PORT (inter-service) ─────────────────────────────────────────────
-// Looks up a user by phone to validate they have an account before issuing OTP.
+// Looks up a user by (phone, userType) — same phone can be registered in
+// multiple apps with different types; each lookup is scoped to one type.
 // Swap FakeUserLookup → HttpUserLookup via USER_SVC_URL env var in server.ts.
 
+import type { UserType } from './types.js';
+
 export interface UserLookupPort {
-  findByPhone(phone: string): Promise<{ id: string; type: 'buyer' | 'seller' } | null>;
+  findByPhoneAndType(phone: string, userType: UserType): Promise<{ id: string; type: UserType } | null>;
 }
 
 export class FakeUserLookup implements UserLookupPort {
-  private devUsers = new Map<string, { id: string; type: 'buyer' | 'seller' }>([
-    ['+919000000001', { id: 'user-b001', type: 'buyer' }],
-    ['+919000000002', { id: 'user-b002', type: 'buyer' }],
-    ['+919000000112', { id: 'seller-112', type: 'seller' }],
-    ['+919000000113', { id: 'seller-113', type: 'seller' }],
-    ['+919000000105', { id: 'seller-105', type: 'seller' }],
+  // key: `${phone}:${type}`
+  private devUsers = new Map<string, { id: string; type: UserType }>([
+    ['+919000000001:buyer',  { id: 'user-b001',   type: 'buyer'  }],
+    ['+919000000002:buyer',  { id: 'user-b002',   type: 'buyer'  }],
+    ['+919000000112:seller', { id: 'seller-112',  type: 'seller' }],
+    ['+919000000113:seller', { id: 'seller-113',  type: 'seller' }],
+    ['+919000000105:seller', { id: 'seller-105',  type: 'seller' }],
+    ['+919000000099:agent',  { id: 'agent-001',   type: 'agent'  }],
   ]);
 
-  async findByPhone(phone: string) {
-    return this.devUsers.get(phone) ?? null;
+  async findByPhoneAndType(phone: string, userType: UserType) {
+    return this.devUsers.get(`${phone}:${userType}`) ?? null;
   }
 }
 
-// Real implementation — calls user-svc GET /v1/users?phone=<phone>
+// Real implementation — calls user-svc GET /v1/users?phone=<phone>&type=<type>
 export class HttpUserLookup implements UserLookupPort {
   constructor(private baseUrl: string) {}
 
-  async findByPhone(phone: string): Promise<{ id: string; type: 'buyer' | 'seller' } | null> {
+  async findByPhoneAndType(phone: string, userType: UserType): Promise<{ id: string; type: UserType } | null> {
     try {
-      const res = await fetch(`${this.baseUrl}/v1/users?phone=${encodeURIComponent(phone)}`);
+      const res = await fetch(`${this.baseUrl}/v1/users?phone=${encodeURIComponent(phone)}&type=${userType}`);
       if (!res.ok) return null;
-      const body = await res.json() as { success: boolean; data: Array<{ id: string; type: 'buyer' | 'seller' }> };
+      const body = await res.json() as { success: boolean; data: Array<{ id: string; type: UserType }> };
       return body.success && body.data.length > 0 ? (body.data[0] ?? null) : null;
     } catch {
-      return null; // graceful fallback if user-svc is unreachable
+      return null;
     }
   }
 }
