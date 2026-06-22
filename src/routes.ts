@@ -1,7 +1,10 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { ZodError } from 'zod';
 import type { AuthService } from './service.js';
-import { requestOtpSchema, verifyOtpSchema, verifyTokenSchema } from './schemas.js';
+import {
+  requestOtpSchema, verifyOtpSchema, verifyTokenSchema,
+  registerSchema, registerVerifySchema,
+} from './schemas.js';
 import { AppError } from './errors.js';
 
 function handleError(err: unknown, reply: FastifyReply) {
@@ -26,7 +29,29 @@ function handleError(err: unknown, reply: FastifyReply) {
 
 export function registerAuthRoutes(app: FastifyInstance, service: AuthService) {
 
-  // POST /v1/auth/otp/request
+  // ── Registration ──────────────────────────────────────────────────────────
+
+  // POST /v1/auth/register — create account + send OTP
+  app.post('/v1/auth/register', async (request, reply) => {
+    try {
+      const body   = registerSchema.parse(request.body);
+      const result = await service.register(body.name, body.phone, body.type, body.email);
+      return reply.status(201).send({ success: true, data: result });
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  // POST /v1/auth/register/verify — verify OTP, mark user verified, issue JWT
+  app.post('/v1/auth/register/verify', async (request, reply) => {
+    try {
+      const body   = registerVerifySchema.parse(request.body);
+      const result = await service.registerVerify(body.phone, body.code);
+      return reply.send({ success: true, data: result });
+    } catch (err) { return handleError(err, reply); }
+  });
+
+  // ── Login ─────────────────────────────────────────────────────────────────
+
+  // POST /v1/auth/otp/request — send OTP to existing user
   app.post('/v1/auth/otp/request', async (request, reply) => {
     try {
       const body   = requestOtpSchema.parse(request.body);
@@ -35,7 +60,7 @@ export function registerAuthRoutes(app: FastifyInstance, service: AuthService) {
     } catch (err) { return handleError(err, reply); }
   });
 
-  // POST /v1/auth/otp/verify
+  // POST /v1/auth/otp/verify — verify OTP and issue JWT
   app.post('/v1/auth/otp/verify', async (request, reply) => {
     try {
       const body   = verifyOtpSchema.parse(request.body);
@@ -44,7 +69,9 @@ export function registerAuthRoutes(app: FastifyInstance, service: AuthService) {
     } catch (err) { return handleError(err, reply); }
   });
 
-  // POST /v1/auth/token/verify  — used by other services as a soft auth check
+  // ── Token / Session ───────────────────────────────────────────────────────
+
+  // POST /v1/auth/token/verify — used by other services for soft auth check
   app.post('/v1/auth/token/verify', async (request, reply) => {
     try {
       const body   = verifyTokenSchema.parse(request.body);
@@ -53,7 +80,7 @@ export function registerAuthRoutes(app: FastifyInstance, service: AuthService) {
     } catch (err) { return handleError(err, reply); }
   });
 
-  // DELETE /v1/auth/sessions/:id  — logout
+  // DELETE /v1/auth/sessions/:id — logout
   app.delete('/v1/auth/sessions/:id', async (request, reply) => {
     try {
       const { id } = request.params as { id: string };

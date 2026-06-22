@@ -2,7 +2,6 @@ import { createHmac } from 'node:crypto';
 import type { TokenPayload } from './types.js';
 
 // ── OTP PORT ──────────────────────────────────────────────────────────────────
-// Swap FakeOtpProvider → TwilioOtpProvider in server.ts; zero changes elsewhere.
 
 export interface OtpPort {
   send(phone: string, code: string): Promise<void>;
@@ -10,14 +9,11 @@ export interface OtpPort {
 
 export class FakeOtpProvider implements OtpPort {
   async send(phone: string, code: string): Promise<void> {
-    // In production: Twilio SMS API
     console.log(`[OTP] ${phone} → ${code}`);
   }
 }
 
-// ── JWT PORT ───────────────────────────────────────────────────────────────────
-// HS256 using Node.js crypto only — no external library needed.
-// Swap SimpleHmacJwt → any JWKS-backed implementation in server.ts.
+// ── JWT PORT ──────────────────────────────────────────────────────────────────
 
 export interface JwtPort {
   sign(payload: Omit<TokenPayload, 'iat' | 'exp'>): string;
@@ -57,45 +53,58 @@ export class SimpleHmacJwt implements JwtPort {
   }
 }
 
-// ── USER-SVC PORT (inter-service) ─────────────────────────────────────────────
-// Looks up a user by (phone, userType) — same phone can be registered in
-// multiple apps with different types; each lookup is scoped to one type.
-// Swap FakeUserLookup → HttpUserLookup via USER_SVC_URL env var in server.ts.
-
-import type { UserType } from './types.js';
+// ── USER LOOKUP PORT (inter-service) ──────────────────────────────────────────
 
 export interface UserLookupPort {
-  findByPhoneAndType(phone: string, userType: UserType): Promise<{ id: string; type: UserType } | null>;
+  findByPhone(phone: string): Promise<{ id: string; type: 'buyer' | 'seller'; email?: string } | null>;
 }
 
-export class FakeUserLookup implements UserLookupPort {
-  // key: `${phone}:${type}`
-  private devUsers = new Map<string, { id: string; type: UserType }>([
-    ['+919000000001:buyer',  { id: 'user-b001',   type: 'buyer'  }],
-    ['+919000000002:buyer',  { id: 'user-b002',   type: 'buyer'  }],
-    ['+919000000112:seller', { id: 'seller-112',  type: 'seller' }],
-    ['+919000000113:seller', { id: 'seller-113',  type: 'seller' }],
-    ['+919000000105:seller', { id: 'seller-105',  type: 'seller' }],
-    ['+919000000099:agent',  { id: 'agent-001',   type: 'agent'  }],
-  ]);
-
-  async findByPhoneAndType(phone: string, userType: UserType) {
-    return this.devUsers.get(`${phone}:${userType}`) ?? null;
-  }
-}
-
-// Real implementation — calls user-svc GET /v1/users?phone=<phone>&type=<type>
 export class HttpUserLookup implements UserLookupPort {
   constructor(private baseUrl: string) {}
 
-  async findByPhoneAndType(phone: string, userType: UserType): Promise<{ id: string; type: UserType } | null> {
+  async findByPhone(phone: string): Promise<{ id: string; type: 'buyer' | 'seller'; email?: string } | null> {
     try {
-      const res = await fetch(`${this.baseUrl}/v1/users?phone=${encodeURIComponent(phone)}&type=${userType}`);
+      const res = await fetch(`${this.baseUrl}/v1/users?phone=${encodeURIComponent(phone)}`);
       if (!res.ok) return null;
-      const body = await res.json() as { success: boolean; data: Array<{ id: string; type: UserType }> };
+      const body = await res.json() as {
+        success: boolean;
+        data: Array<{ id: string; type: 'buyer' | 'seller'; email?: string }>;
+      };
       return body.success && body.data.length > 0 ? (body.data[0] ?? null) : null;
     } catch {
       return null;
     }
+  }
+}
+
+// ── USER REGISTRATION PORT (inter-service) ────────────────────────────────────
+
+export interface UserRegistrationPort {
+  create(name: string, phone: string, type: 'buyer' | 'seller', email?: string): Promise<{ id: string; type: 'buyer' | 'seller' }>;
+  verify(userId: string): Promise<void>;
+}
+
+export class HttpUserRegistration implements UserRegistrationPort {
+  constructor(private baseUrl: string, private adminKey: string) {}
+
+  async create(name: string, phone: string, type: 'buyer' | 'seller', email?: string): Promise<{ id: string; type: 'buyer' | 'seller' }> {
+    const res = await fetch(`${this.baseUrl}/v1/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, phone, type, ...(email ? { email } : {}) }),
+    });
+    if (!res.ok) {
+      const err = await res.json() as { error?: { title?: string } };
+      throw new Error(err.error?.title ?? `user-svc returned ${res.status}`);
+    }
+    const body = await res.json() as { data: { id: string; type: 'buyer' | 'seller' } };
+    return body.data;
+  }
+
+  async verify(userId: string): Promise<void> {
+    await fetch(`${this.baseUrl}/v1/users/${userId}/verify`, {
+      method: 'PATCH',
+      headers: { 'X-Admin-Key': this.adminKey },
+    });
   }
 }
